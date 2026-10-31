@@ -108,25 +108,104 @@ git push -u origin lec03
 
 ## 宿題（どれか1つで完了）
 
+基礎・実装・発展の3つのレベルから1つを選んで取り組みます。どれか1つに取り組めば完了です。
+
 | レベル | 内容 |
 |---|---|
-| 基礎 | `INSTRUCTIONS` やツールの docstring を書き換え、ツールの呼ばれ方や回答がどう変わるかを `--trace` で比べて記録する |
-| 実装 | 学習の記録を `learning_log/` に保存する `save_learning_log` ツールを作る。保存の前に利用者の確認を挟む（Pydantic AI の `requires_approval=True`）。TestModel を使ったテストも書く |
-| 発展 | 次のどちらか。(a) 同じエージェントを Google の ADK で作り直し、書き方や `adk web` での見え方を比較する。(b) 講義で紹介した Pi を Codespaces 上で動かし、公開されている Pi のシステムプロンプトと自分のエージェントの `INSTRUCTIONS` を比較する |
+| 基礎 | 演習で見た `app/agent.py` の `INSTRUCTIONS` や、`app/tools.py` のツールの docstring を書き換えます。同じ質問を `--trace` 付きで実行し、ツールの呼ばれ方や回答がどう変わるかを比べて記録します |
+| 実装 | 学習の記録を `learning_log/` フォルダに保存するツール `save_learning_log` を作ります。保存は取り消しにくい操作なので、保存の前に利用者の確認を挟みます（Pydantic AI の `requires_approval=True`） |
+| 発展 | 次のどちらかに取り組みます。(a) 演習のエージェントと同じ指示とツールを使い、エージェントを組み立てる部分だけを Google の ADK で書き直し、`adk run` で動かして、書き方や回答を比べます。(b) コーディングエージェントの Pi を Codespaces で動かし、公開されている Pi のシステムプロンプトと、自分のエージェントの `INSTRUCTIONS` を比べます |
 
-### 発展（b）の進め方
+提出は、演習と同じ `lectures/03/answer.md` の「宿題」欄に書きます。
 
-Pi はファイルの読み書きやコマンドの実行ができるコーディングエージェントで、ツールを実行するたびに確認は求めません。自分のPCではなく、Codespaces の中で試してください。
+### 基礎の進め方
 
-```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-pi
+演習の手順3で見た2か所のどちらかを、一度に1か所だけ変え、同じ質問を `--trace` 付きで実行して比べます。
+
+- `app/agent.py` の `INSTRUCTIONS`（31行目付近）：エージェント全体への指示です
+- `app/tools.py` の各ツールの docstring：ツールの説明文として、モデルに渡ります
+
+たとえば、次のような変更が考えられます。ツールの呼ばれ方・回数・引数と、回答がどう変わったかを記録しましょう。
+
+- `INSTRUCTIONS` から「必ず search_glossary で用語集を確認する」の行を消すと、検索せずに答えるようになるか
+- `search_glossary` の docstring の「query には調べたい用語を1つだけ入れる」を「まとめて入れる」に変えると、検索の回数や引数がどう変わるか
+- `INSTRUCTIONS` の「回答の最後に、関係する回（第N回）を示す」を別の指示（例：「最後に確認問題を1問出す」）に変えると、回答がどう変わるか
+
+### 実装の進め方
+
+1. `app/tools.py` に `save_learning_log` を作り、`app/agent.py` で `requires_approval=True` を付けて登録します
+2. このツールをモデルが呼ぶと、実行は承認待ちで一度止まり、結果（`result.output`）として `DeferredToolRequests` が返ります。そのため、エージェントの `output_type` に `DeferredToolRequests` を加えます（加えないとエラーになります）
+
+   ```python
+   from pydantic_ai import Agent, DeferredToolRequests
+
+   agent = Agent(instructions=INSTRUCTIONS,
+                 output_type=[str, DeferredToolRequests])
+   ```
+
+3. CLI では、`result.output.approvals` の呼び出しごとに、保存してよいかを利用者に聞きます。その結果（`DeferredToolResults`）と、それまでの会話（`message_history=result.all_messages()`）を渡して、もう一度 `run_sync` を実行します
+
+詳しくは、Pydantic AI の公式ドキュメント「Deferred Tools」の Human-in-the-Loop Tool Approval を参考にしてください：https://pydantic.dev/docs/ai/tools-toolsets/deferred-tools/
+
+### 発展（a）の進め方：ADK で作り直す
+
+演習のエージェントと同じ指示とツールを使い、エージェントを組み立てる部分だけを ADK で書き直します。
+
+| 範囲 | 内容 |
+|---|---|
+| そのまま使う | `app/agent.py` の `INSTRUCTIONS` と、`app/tools.py` の `search_glossary`・`get_lecture_summary`（演習で `make_quiz` を作った人は `make_quiz` も） |
+| 新しく書く | `adk_agent/glossary_agent/` フォルダに `agent.py`（下のコード）と `__init__.py`（中身は `from . import agent` の1行）を作ります |
+| 作らなくてよい | `--trace` などのコマンドの機能、テスト、承認付きのツール。`app/` のファイルは変えません |
+| 比べること | 書き方（指示とツールの渡し方）と、演習と同じ質問への回答の違い |
+
+`adk_agent/glossary_agent/agent.py` の形：
+
+```python
+from google.adk.agents import Agent
+from app import tools
+from app.agent import INSTRUCTIONS
+
+root_agent = Agent(
+    model="gemini-3.5-flash-lite",
+    name="glossary_agent",
+    instruction=INSTRUCTIONS,
+    tools=[...],  # 演習で使ったツール
+)
 ```
 
-- Gemini は環境変数 `GEMINI_API_KEY` を読むので、Codespaces secret があればそのまま使えます。Pi の中で `/model` と入力し、Gemini のモデルを選びます
-- npm のパッケージ名は `@earendil-works/pi-coding-agent` です（古い記事にある `@mariozechner/...` は旧名です）
-- Pi のシステムプロンプトは、公開リポジトリ https://github.com/earendil-works/pi の `packages/coding-agent/src/core/system-prompt.ts` にあります。自分の `INSTRUCTIONS` と比べ、何が書かれていて何が書かれていないかを見てみましょう
-- 公式ドキュメント：https://github.com/earendil-works/pi/tree/main/packages/coding-agent/docs
+動かすときは、リポジトリの直下で次を実行します。
+
+```bash
+PYTHONPATH=. uv run --with google-adk adk run adk_agent/glossary_agent
+```
+
+- `adk run` はターミナルで対話する方法です。質問を入力して Enter を押すと回答が返ります。終わるときは `exit` と入力します
+- `uv run --with google-adk` は、講座の環境に ADK を一時的に足して実行する方法です。`pyproject.toml` や `uv.lock` は変わりません
+- `PYTHONPATH=.` は、リポジトリ直下の `app` フォルダを読み込むために必要です
+- API キーは、Codespaces secret の `GEMINI_API_KEY` がそのまま使われます
+- 初回は ADK の取得に1分ほどかかります
+
+演習と同じ質問を投げ、Pydantic AI 版との書き方の違いと、回答の違いを記録しましょう。
+
+ADK は 2.0 で大きな変更がありました。Web 上の紹介記事などでは、変更に対応できていない古い情報が含まれることもあるため、公式ドキュメントの内容を参考に実装すると間違いが減ると思います。
+
+- 公式ドキュメント：https://adk.dev/
+
+### 発展（b）の進め方：Pi を Codespaces で動かす
+
+Pi は、ファイルの書き換えやコマンドの実行を、確認を求めずに行うコーディングエージェントです。自分の PC ではなく、Codespaces の中で試してください。
+
+1. **インストールする**：Codespaces のターミナルで次を実行します
+
+   ```bash
+   npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+   ```
+
+2. **起動する**：ターミナルで `pi` と入力します
+3. **モデルを設定する**：Pi の中で `/model` と入力し、Gemini のモデルを選びます。API キーは、Codespaces secret の `GEMINI_API_KEY` がそのまま使われます
+4. **比べる**：Pi のシステムプロンプトは、公開リポジトリ https://github.com/earendil-works/pi の `packages/coding-agent/src/core/system-prompt.ts` にあります。自分の `INSTRUCTIONS` と比べ、何が書かれていて、何が書かれていないかを見てみましょう
+
+- Pi の公式ドキュメント：https://github.com/earendil-works/pi/tree/main/packages/coding-agent/docs
 
 ## 参考
 
