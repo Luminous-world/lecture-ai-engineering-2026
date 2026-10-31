@@ -209,5 +209,5 @@ Pi は、ファイルの書き換えやコマンドの実行を、確認を求�
 
 ## 参考
 
-- Pydantic AI: https://ai.pydantic.dev/
-- ADK: https://google.github.io/adk-docs/
+- Pydantic AI: https://pydantic.dev/docs/ai/
+- ADK: https://adk.dev/
