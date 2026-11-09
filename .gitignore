@@ -12,5 +12,7 @@ learning_log/
 
 # macOS
 .DS_Store
+
+# Google ADK session database
 .adk/
 *.db
