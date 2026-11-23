@@ -138,8 +138,10 @@ def search(query: str) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+# description: Search pages using vector seeds and query-matched term nodes in the knowledge graph.
 def search_graph(query: str) -> dict:
     """ベクトル検索を入口に、前後ページと共通用語で候補を広げる。"""
+    print("[Section 5: search_graph] version: 1.1.0")
     pages = {page["page_id"]: page for page in load_pages(RAG_SOURCE)}
     graph = json.loads(RAG_GRAPH.read_text(encoding="utf-8"))
     nodes = {node["id"]: node for node in graph["nodes"]
@@ -154,6 +156,38 @@ def search_graph(query: str) -> dict:
     seeds = [hit for hit in search(query) if hit["page_id"] in pages][:min(GRAPH_START_K, GRAPH_MAX_RESULTS)]
     seed_ids = {seed["page_id"] for seed in seeds}
     results, candidates = [], {}
+
+    # [ADDED START] v1.1.0: Start traversal directly from term nodes matched in the query
+    seed_doc_ids = {pages[sid]["document_id"] for sid in seed_ids}
+    query_lower = query.lower()
+    matched_terms = []
+    for node_id, node in nodes.items():
+        if node["kind"] != "term":
+            continue
+        labels = [node.get("title", "")] + list(node.get("aliases") or [])
+        for label in labels:
+            if isinstance(label, str) and len(label.strip()) >= 2 and label.strip().lower() in query_lower:
+                matched_terms.append(node_id)
+                break
+
+    for term_id in matched_terms:
+        for neighbor in sorted(adjacent[term_id]):
+            if neighbor not in pages or neighbor in seed_ids:
+                continue
+            is_cross_doc = 0 if pages[neighbor]["document_id"] not in seed_doc_ids else 1
+            priority = (0, is_cross_doc, len(adjacent[term_id]), neighbor)
+            candidate = {
+                **pages[neighbor],
+                "hops": 1,
+                "path": [
+                    {"id": term_id, "title": nodes[term_id]["title"]},
+                    {"id": neighbor, "title": pages[neighbor]["title"]},
+                ],
+            }
+            if neighbor not in candidates or priority < candidates[neighbor][0]:
+                candidates[neighbor] = (priority, candidate)
+    # [ADDED END]
+
     for rank, seed in enumerate(seeds):
         root = seed["page_id"]
         results.append({**pages[root], "distance": seed["distance"], "hops": 0,
@@ -183,7 +217,6 @@ def search_graph(query: str) -> dict:
     expanded = [candidate for _, candidate in sorted(candidates.values())]
     return {"seeds": results, "expanded": expanded[:max(0, GRAPH_MAX_RESULTS - len(results))],
             "max_hops": GRAPH_HOPS}
-
 
 
 def run_full_context(agent, question: str, model, instructions: str, prompt_template: str):
